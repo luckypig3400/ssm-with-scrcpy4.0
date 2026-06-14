@@ -198,18 +198,41 @@ func (c *ScrcpyController) Open(filepath string, version string) error {
 }
 
 func (c *ScrcpyController) Encode(action common.TouchAction, x, y int32, pointerID uint64) []byte {
-	data := make([]byte, 32)
-	data[0] = 2 // type: SC_CONTROL_MSG_TYPE_INJECT_TOUCH_EVENT
-	data[1] = byte(action)
-	binary.BigEndian.PutUint64(data[2:], pointerID)
-	binary.BigEndian.PutUint32(data[10:], uint32(x))
-	binary.BigEndian.PutUint32(data[14:], uint32(y))
-	binary.BigEndian.PutUint16(data[18:], uint16(c.width))
-	binary.BigEndian.PutUint16(data[20:], uint16(c.height))
-	binary.BigEndian.PutUint16(data[22:], 0xffff)
-	binary.BigEndian.PutUint32(data[24:], 1) // AMOTION_EVENT_BUTTON_PRIMARY
-	binary.BigEndian.PutUint32(data[28:], 1) // AMOTION_EVENT_BUTTON_PRIMARY
-	return data
+	// 新版 scrcpy-server 觸控封包長度為 34 bytes
+	b := make([]byte, 34)
+	
+	// type (1 byte): 2 代表 SC_CONTROL_MSG_TYPE_INJECT_TOUCH_EVENT
+	b[0] = 2 
+	
+	// action (1 byte): 0=Down, 1=Up, 2=Move 等
+	b[1] = byte(action)
+
+	// pointer_id (8 bytes)
+	binary.BigEndian.PutUint64(b[2:10], pointerID)
+
+	// position.x (4 bytes)
+	binary.BigEndian.PutUint32(b[10:14], uint32(x))
+	
+	// position.y (4 bytes)
+	binary.BigEndian.PutUint32(b[14:18], uint32(y))
+	
+	// position.screen_width (2 bytes): 填 0 即可，伺服器端會自動適應
+	binary.BigEndian.PutUint16(b[18:20], uint16(0))
+	
+	// position.screen_height (2 bytes): 填 0 即可
+	binary.BigEndian.PutUint16(b[20:22], uint16(0))
+
+	// pressure (4 bytes float32): 舊版是 0xffff，新版必須是 float32。
+	// 1.0f 轉換為 IEEE 754 的十六進位表示法為 0x3f800000
+	binary.BigEndian.PutUint32(b[22:26], 0x3f800000)
+
+	// action_button (4 bytes): 預設填 0
+	binary.BigEndian.PutUint32(b[26:30], 0)
+
+	// buttons (4 bytes): 1 代表 AMOTION_EVENT_BUTTON_PRIMARY (主觸控/左鍵)
+	binary.BigEndian.PutUint32(b[30:34], 1)
+
+	return b
 }
 
 func (c *ScrcpyController) touch(action common.TouchAction, x, y int32, pointerID uint64) {
