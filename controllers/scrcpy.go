@@ -135,6 +135,12 @@ func (c *ScrcpyController) Open(filepath string, version string) error {
 		return err
 	}
 
+	// ──────────────── 新增的部分 ──────────────── //
+	// 因應 Scrcpy 4.0 增加了 4 byte 的 Session flags，
+	// 我們需要先將這 4 bytes 讀出並丟棄，防止位移錯誤。
+	videoSocket.Read(buf)
+	// ────────────────────────────────────────── //
+
 	videoSocket.Read(buf)
 	c.width = int(binary.BigEndian.Uint32(buf))
 
@@ -197,43 +203,19 @@ func (c *ScrcpyController) Open(filepath string, version string) error {
 	return nil
 }
 
-// Encode 將觸控動作序列化為符合 scrcpy-server v4.0 協定的 32-byte 封包
 func (c *ScrcpyController) Encode(action common.TouchAction, x, y int32, pointerID uint64) []byte {
-	// scrcpy v2.0+ (包含 v3.x 與 v4.0) 的標準手指觸控封包長度為嚴格的 32 bytes
-	b := make([]byte, 32)
-	
-	// 1. type (1 byte): 2 代表 SC_CONTROL_MSG_TYPE_INJECT_TOUCH_EVENT
-	b[0] = 2 
-	
-	// 2. action (1 byte): 0=Down, 1=Up, 2=Move
-	b[1] = byte(action)
-
-	// 3. pointer_id (8 bytes)
-	binary.BigEndian.PutUint64(b[2:10], pointerID)
-
-	// 4. position.x (4 bytes)
-	binary.BigEndian.PutUint32(b[10:14], uint32(x))
-	
-	// 5. position.y (4 bytes)
-	binary.BigEndian.PutUint32(b[14:18], uint32(y))
-	
-	// 6. position.screen_width (2 bytes)
-	// 帶入真實的螢幕寬高，避免伺服器將所有座標映射至(0,0)而引發拉狀態列的錯誤
-	binary.BigEndian.PutUint16(b[18:20], uint16(c.width))
-	
-	// 7. position.screen_height (2 bytes)
-	binary.BigEndian.PutUint16(b[20:22], uint16(c.height))
-
-	// 8. pressure (2 bytes uint16): 0xffff 代表 1.0f (最大觸控壓力)
-	binary.BigEndian.PutUint16(b[22:24], 0xffff)
-
-	// 9. action_button (4 bytes): 一般觸控為 0
-	binary.BigEndian.PutUint32(b[24:28], 0)
-
-	// 10. buttons (4 bytes): 一般觸控為 0
-	binary.BigEndian.PutUint32(b[28:32], 0)
-
-	return b
+	data := make([]byte, 32)
+	data[0] = 2 // type: SC_CONTROL_MSG_TYPE_INJECT_TOUCH_EVENT
+	data[1] = byte(action)
+	binary.BigEndian.PutUint64(data[2:], pointerID)
+	binary.BigEndian.PutUint32(data[10:], uint32(x))
+	binary.BigEndian.PutUint32(data[14:], uint32(y))
+	binary.BigEndian.PutUint16(data[18:], uint16(c.width))
+	binary.BigEndian.PutUint16(data[20:], uint16(c.height))
+	binary.BigEndian.PutUint16(data[22:], 0xffff)
+	binary.BigEndian.PutUint32(data[24:], 1) // AMOTION_EVENT_BUTTON_PRIMARY
+	binary.BigEndian.PutUint32(data[28:], 1) // AMOTION_EVENT_BUTTON_PRIMARY
+	return data
 }
 
 func (c *ScrcpyController) touch(action common.TouchAction, x, y int32, pointerID uint64) {
